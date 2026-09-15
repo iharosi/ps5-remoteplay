@@ -5,7 +5,13 @@ discover and read status, wake, put into standby, and pair via PSN OAuth + Remot
 
 Ported from [playactor](https://github.com/dhleong/playactor) (PS5 code path only).
 
-## Install (development)
+## Install
+
+```bash
+pip install ps5-remoteplay
+```
+
+## Development
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
