@@ -89,3 +89,10 @@ def test_credentials_roundtrip_playactor_shape():
 def test_credentials_reject_incomplete():
     with pytest.raises(ValueError):
         Credentials.from_dict({"accountId": "x", "user-credential": "1", "registration": {}})
+
+
+def test_login_failed_messages():
+    from ps5_remoteplay.errors import LoginFailed
+
+    assert "another Remote Play session" in str(LoginFailed(2))
+    assert str(LoginFailed(7)) == "Remote Play login failed (code 7)"

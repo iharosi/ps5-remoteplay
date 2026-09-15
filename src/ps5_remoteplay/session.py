@@ -66,45 +66,56 @@ class RemotePlaySession:
         port: int = REMOTEPLAY_PORT,
         timeout: float = 15.0,
     ) -> Self:
-        async with asyncio.timeout(timeout):
-            nonce = await _server_nonce(host, credentials, port, timeout)
-            cipher = SessionCipher(credentials.rp_key, nonce)
+        step = "session init"
+        try:
+            async with asyncio.timeout(timeout):
+                nonce = await _server_nonce(host, credentials, port, timeout)
+                cipher = SessionCipher(credentials.rp_key, nonce)
 
-            def encrypted(data: bytes) -> str:
-                return base64.b64encode(cipher.encrypt(data)).decode()
+                def encrypted(data: bytes) -> str:
+                    return base64.b64encode(cipher.encrypt(data)).decode()
 
-            # Encryption order sets the counters (0..4); keep it in this sequence.
-            headers = {
-                "RP-Auth": encrypted(bytes.fromhex(credentials.regist_key).ljust(NONCE_LENGTH, b"\0")),
-                "RP-Version": RP_VERSION,
-                "RP-Did": encrypted(_DID),
-                "RP-ControllerType": "3",
-                "RP-ClientType": "11",
-                "RP-OSType": encrypted(_OS_TYPE),
-                "RP-ConPath": "1",
-                "RP-StartBitrate": encrypted(bytes(4)),
-                "RP-StreamingType": encrypted(struct.pack("<i", 1)),
-            }
+                # Encryption order sets the counters (0..4); keep it in this sequence.
+                headers = {
+                    "RP-Auth": encrypted(bytes.fromhex(credentials.regist_key).ljust(NONCE_LENGTH, b"\0")),
+                    "RP-Version": RP_VERSION,
+                    "RP-Did": encrypted(_DID),
+                    "RP-ControllerType": "3",
+                    "RP-ClientType": "11",
+                    "RP-OSType": encrypted(_OS_TYPE),
+                    "RP-ConPath": "1",
+                    "RP-StartBitrate": encrypted(bytes(4)),
+                    "RP-StreamingType": encrypted(struct.pack("<i", 1)),
+                }
 
-            reader, writer = await asyncio.open_connection(host, port)
-            session = cls(reader, writer, cipher)
-            try:
-                writer.write(build_request("GET", host, port, "/sie/ps5/rp/sess/ctrl", headers))
-                await writer.drain()
-                response = await read_response(reader, read_body=False)
-                raise_for_status(response)
-                if response.headers.get("content-length", "0") != "0":
-                    raise ProtocolError("Unexpected body on session ctrl response")
+                step = "session control request"
+                reader, writer = await asyncio.open_connection(host, port)
+                session = cls(reader, writer, cipher)
+                try:
+                    writer.write(build_request("GET", host, port, "/sie/ps5/rp/sess/ctrl", headers))
+                    await writer.drain()
+                    _LOGGER.debug("GET /sie/ps5/rp/sess/ctrl: request sent")
+                    response = await read_response(reader, read_body=False)
+                    _LOGGER.debug(
+                        "GET /sie/ps5/rp/sess/ctrl: HTTP %d, headers %s",
+                        response.status, sorted(response.headers),
+                    )
+                    raise_for_status(response)
+                    if response.headers.get("content-length", "0") != "0":
+                        raise ProtocolError("Unexpected body on session ctrl response")
 
-                server_type = response.headers.get("rp-server-type")
-                if server_type is None:
-                    raise ProtocolError("Session ctrl response has no RP-Server-Type")
-                cipher.decrypt(base64.b64decode(server_type))
+                    server_type = response.headers.get("rp-server-type")
+                    if server_type is None:
+                        raise ProtocolError("Session ctrl response has no RP-Server-Type")
+                    cipher.decrypt(base64.b64decode(server_type))
 
-                await session._login(passcode)
-            except BaseException:
-                await session.close()
-                raise
+                    step = "login"
+                    await session._login(passcode)
+                except BaseException:
+                    await session.close()
+                    raise
+        except TimeoutError as err:
+            raise ProtocolError(f"Timed out after {timeout:g}s waiting for the PS5 during {step}") from err
         return session
 
     async def _send(self, frame_type: int, payload: bytes = b"") -> None:

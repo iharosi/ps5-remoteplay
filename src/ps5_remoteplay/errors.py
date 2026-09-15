@@ -42,7 +42,16 @@ class PasscodeMismatch(PS5Error):
     pass
 
 
+# Only 0 (success) and 1 (wrong passcode) are known for sure; 2 is a guess from observed behaviour
+_LOGIN_RESULTS = {
+    2: "the console refused the login, most likely because another Remote Play "
+       "session is already using this pairing",
+}
+
+
 class LoginFailed(PS5Error):
     def __init__(self, result: int) -> None:
         self.result = result
-        super().__init__(f"Remote Play login failed with result {result}")
+        detail = _LOGIN_RESULTS.get(result)
+        message = f"Remote Play login failed (code {result})"
+        super().__init__(f"{message}: {detail}" if detail else message)

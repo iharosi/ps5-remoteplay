@@ -6,10 +6,13 @@ the headers. A general-purpose client can't guarantee that.
 """
 
 import asyncio
+import logging
 from dataclasses import dataclass
 
 from .const import REMOTEPLAY_PORT, USER_AGENT
 from .errors import ProtocolError, RemotePlayHttpError
+
+_LOGGER = logging.getLogger(__name__)
 
 _MAX_HEADER_BYTES = 64 * 1024
 
@@ -93,10 +96,15 @@ async def request(
     async with asyncio.timeout(timeout):
         reader, writer = await asyncio.open_connection(host, port)
         try:
+            _LOGGER.debug("%s %s: request sent", method, path)
             writer.write(build_request(method, host, port, path, headers, body))
             await writer.drain()
             response = await read_response(reader)
         finally:
             writer.close()
+    _LOGGER.debug(
+        "%s %s: HTTP %d, headers %s, %d body bytes",
+        method, path, response.status, sorted(response.headers), len(response.body),
+    )
     raise_for_status(response)
     return response
