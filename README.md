@@ -44,3 +44,11 @@ else:
 
 `tests/vectors.json` holds byte-exact reference outputs generated from playactor's TypeScript
 implementation (crypto, registration payloads, session headers and frames, wake packets).
+
+## License and credits
+
+AGPL-3.0-only. See `LICENSE`.
+
+The protocol implementation is ported from [playactor](https://github.com/dhleong/playactor)
+by Daniel Leong, whose Remote Play crypto is in turn based on the work of the
+[chiaki](https://git.sr.ht/~thestr4ng3r/chiaki) project.
