@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import logging
+import os
 import struct
 from typing import Self
 
@@ -25,7 +26,8 @@ RESP_HEARTBEAT = 0xFE
 LOGIN_OK = 0
 LOGIN_PASSCODE_UNMATCHED = 1
 
-_DID = bytes.fromhex("00180000000700400080") + bytes(16) + bytes(6)
+_DID_PREFIX = bytes.fromhex("00180000000700400080")
+_DID_SUFFIX = bytes(6)
 _OS_TYPE = b"Win10.0.0"
 
 
@@ -75,11 +77,15 @@ class RemotePlaySession:
                 def encrypted(data: bytes) -> str:
                     return base64.b64encode(cipher.encrypt(data)).decode()
 
+                # A fresh device id per session: the console appears to key sessions by it,
+                # and a fixed one makes every client and every retry collide.
+                did = _DID_PREFIX + os.urandom(16) + _DID_SUFFIX
+
                 # Encryption order sets the counters (0..4); keep it in this sequence.
                 headers = {
                     "RP-Auth": encrypted(bytes.fromhex(credentials.regist_key).ljust(NONCE_LENGTH, b"\0")),
                     "RP-Version": RP_VERSION,
-                    "RP-Did": encrypted(_DID),
+                    "RP-Did": encrypted(did),
                     "RP-ControllerType": "3",
                     "RP-ClientType": "11",
                     "RP-OSType": encrypted(_OS_TYPE),
@@ -115,7 +121,10 @@ class RemotePlaySession:
                     await session.close()
                     raise
         except TimeoutError as err:
-            raise ProtocolError(f"Timed out after {timeout:g}s waiting for the PS5 during {step}") from err
+            raise ProtocolError(
+                f"Timed out after {timeout:g}s waiting for the PS5 during {step}; "
+                "another Remote Play session may still be open on the console"
+            ) from err
         return session
 
     async def _send(self, frame_type: int, payload: bytes = b"") -> None:
