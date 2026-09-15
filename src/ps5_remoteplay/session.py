@@ -188,11 +188,7 @@ class RemotePlaySession:
             _LOGGER.debug("Console did not close the connection after standby")
 
     async def close(self, *, abort: bool = False) -> None:
-        """Close the session. `abort` sends a TCP reset.
-
-        A half-open connection leaves the console believing this client still
-        holds a session, and it then ignores new ones; a reset frees it.
-        """
+        """Close the session; `abort` drops it without waiting for the peer."""
         if abort:
             self._writer.transport.abort()
             return

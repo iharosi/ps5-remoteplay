@@ -32,6 +32,7 @@ class FakeConsole:
         self.ignore_first_ctrl = ignore_first_ctrl
         self.ctrl_requests = 0
         self.received: list[int] = []
+        self.events: list[str] = []
         self.ctrl_headers: dict[str, bytes] = {}
 
     async def __aenter__(self):
@@ -50,6 +51,7 @@ class FakeConsole:
         assert headers["content-length"] == "0"
         assert headers["user-agent"] == "remoteplay Windows"
 
+        self.events.append("ctrl opened" if "/ctrl" in request_line else "init opened")
         if "/init" in request_line:
             if self.reject_init:
                 writer.write(b"HTTP/1.1 403 Forbidden\r\nRP-Application-Reason: 80108b10\r\nContent-Length: 0\r\n\r\n")
@@ -59,6 +61,8 @@ class FakeConsole:
                 writer.write(f"HTTP/1.1 200 OK\r\nRP-Nonce: {nonce}\r\nContent-Length: 0\r\n\r\n".encode())
             await writer.drain()
             writer.close()
+            await writer.wait_closed()
+            self.events.append("init closed")
             return
 
         self.ctrl_requests += 1
@@ -117,6 +121,8 @@ async def test_login_and_standby():
         await session.close()
 
     assert console.received == [0x05, 0x1FE, 0x50]
+    # the console rejects a second connection opened while the first is still closing
+    assert console.events == ["init opened", "init closed", "ctrl opened"]
     assert console.ctrl_headers["rp-auth"] == bytes.fromhex(REGIST_KEY).ljust(16, b"\0")
     did = console.ctrl_headers["rp-did"]
     assert len(did) == 32
