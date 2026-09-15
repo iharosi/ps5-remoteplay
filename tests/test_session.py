@@ -31,6 +31,7 @@ class FakeConsole:
         self.reject_init = reject_init
         self.ignore_first_ctrl = ignore_first_ctrl
         self.ctrl_requests = 0
+        self.reset_by_client = False
         self.received: list[int] = []
         self.events: list[str] = []
         self.ctrl_headers: dict[str, bytes] = {}
@@ -71,7 +72,7 @@ class FakeConsole:
             try:
                 await reader.read()
             except ConnectionResetError:
-                pass
+                self.reset_by_client = True
             return
 
         cipher = SessionCipher(RP_KEY, SERVER_NONCE)
@@ -178,6 +179,7 @@ async def test_standby_retries_after_a_stuck_session(monkeypatch) -> None:
             AsyncMock(return_value=SimpleNamespace(status=DeviceStatus.AWAKE)),
         )
         assert await session_module.standby("127.0.0.1", CREDS, port=console.port, timeout=1) is True
+        assert console.reset_by_client, "the abandoned session must be reset, not closed politely"
 
     assert console.ctrl_requests == 2
     assert closes[0] is True, "the stuck session must be reset, not left half-open"

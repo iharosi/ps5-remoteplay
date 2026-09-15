@@ -2,6 +2,7 @@ import asyncio
 import base64
 import logging
 import os
+import socket
 import struct
 from typing import Self
 
@@ -188,8 +189,22 @@ class RemotePlaySession:
             _LOGGER.debug("Console did not close the connection after standby")
 
     async def close(self, *, abort: bool = False) -> None:
-        """Close the session; `abort` drops it without waiting for the peer."""
+        """Close the session.
+
+        `abort` resets the connection instead of closing it politely: a console
+        that never answered keeps the session reserved for this pairing after a
+        normal close, and then refuses every later session as "already in use".
+        """
         if abort:
+            sock = self._writer.transport.get_extra_info("socket")
+            if sock is not None:
+                try:
+                    # SO_LINGER with a zero timeout makes close() send RST
+                    sock.setsockopt(
+                        socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0)
+                    )
+                except OSError:
+                    _LOGGER.debug("Could not force a TCP reset on the abandoned session")
             self._writer.transport.abort()
             return
         self._writer.close()
