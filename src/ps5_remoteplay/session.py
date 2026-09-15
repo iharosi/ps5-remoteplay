@@ -29,6 +29,7 @@ LOGIN_PASSCODE_UNMATCHED = 1
 _DID_PREFIX = bytes.fromhex("00180000000700400080")
 _DID_SUFFIX = bytes(6)
 _OS_TYPE = b"Win10.0.0"
+RETRY_DELAY = 3.0
 
 
 def encode_frame(frame_type: int, payload: bytes = b"") -> bytes:
@@ -118,7 +119,7 @@ class RemotePlaySession:
                     step = "login"
                     await session._login(passcode)
                 except BaseException:
-                    await session.close()
+                    await session.close(abort=True)
                     raise
         except TimeoutError as err:
             raise ProtocolError(
@@ -186,7 +187,15 @@ class RemotePlaySession:
         except TimeoutError:
             _LOGGER.debug("Console did not close the connection after standby")
 
-    async def close(self) -> None:
+    async def close(self, *, abort: bool = False) -> None:
+        """Close the session. `abort` sends a TCP reset.
+
+        A half-open connection leaves the console believing this client still
+        holds a session, and it then ignores new ones; a reset frees it.
+        """
+        if abort:
+            self._writer.transport.abort()
+            return
         self._writer.close()
         try:
             await self._writer.wait_closed()
@@ -199,13 +208,27 @@ async def standby(
     credentials: Credentials,
     *,
     passcode: str | None = None,
+    port: int = REMOTEPLAY_PORT,
     timeout: float = 15.0,
 ) -> bool:
     """Put an awake console into standby. Returns False if it was already in standby."""
     device = await get_device(host)
     if device.status == DeviceStatus.STANDBY:
         return False
-    session = await RemotePlaySession.open(host, credentials, passcode=passcode, timeout=timeout)
+
+    try:
+        session = await RemotePlaySession.open(
+            host, credentials, passcode=passcode, port=port, timeout=timeout
+        )
+    except ProtocolError as err:
+        # The first attempt may hit a session the console still thinks is open;
+        # opening it reset that connection, so one retry usually gets through.
+        _LOGGER.debug("Retrying session after: %s", err)
+        await asyncio.sleep(RETRY_DELAY)
+        session = await RemotePlaySession.open(
+            host, credentials, passcode=passcode, port=port, timeout=timeout
+        )
+
     try:
         await session.standby()
     finally:

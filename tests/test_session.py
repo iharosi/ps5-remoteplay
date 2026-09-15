@@ -1,9 +1,13 @@
 import asyncio
 import base64
 import struct
+from unittest.mock import AsyncMock
 
 import pytest
 
+from types import SimpleNamespace
+
+from ps5_remoteplay import DeviceStatus
 from ps5_remoteplay.credentials import Credentials
 from ps5_remoteplay.crypto import SessionCipher
 from ps5_remoteplay.errors import PasscodeMismatch, PasscodeRequired, RemotePlayHttpError
@@ -20,9 +24,13 @@ CREDS = Credentials(
 
 
 class FakeConsole:
-    def __init__(self, *, passcode: str | None = None, reject_init: bool = False) -> None:
+    def __init__(
+        self, *, passcode: str | None = None, reject_init: bool = False, ignore_first_ctrl: bool = False
+    ) -> None:
         self.passcode = passcode
         self.reject_init = reject_init
+        self.ignore_first_ctrl = ignore_first_ctrl
+        self.ctrl_requests = 0
         self.received: list[int] = []
         self.ctrl_headers: dict[str, bytes] = {}
 
@@ -51,6 +59,15 @@ class FakeConsole:
                 writer.write(f"HTTP/1.1 200 OK\r\nRP-Nonce: {nonce}\r\nContent-Length: 0\r\n\r\n".encode())
             await writer.drain()
             writer.close()
+            return
+
+        self.ctrl_requests += 1
+        if self.ignore_first_ctrl and self.ctrl_requests == 1:
+            # the console acknowledges the request but never answers
+            try:
+                await reader.read()
+            except ConnectionResetError:
+                pass
             return
 
         cipher = SessionCipher(RP_KEY, SERVER_NONCE)
@@ -134,3 +151,28 @@ async def test_http_error_reason():
     async with FakeConsole(reject_init=True) as console:
         with pytest.raises(RemotePlayHttpError, match="already in use"):
             await RemotePlaySession.open("127.0.0.1", CREDS, port=console.port, timeout=5)
+
+
+async def test_standby_retries_after_a_stuck_session(monkeypatch) -> None:
+    from ps5_remoteplay import session as session_module
+
+    async with FakeConsole(ignore_first_ctrl=True) as console:
+        closes: list[bool] = []
+        original_close = session_module.RemotePlaySession.close
+
+        async def record_close(self, *, abort: bool = False):
+            closes.append(abort)
+            await original_close(self, abort=abort)
+
+        monkeypatch.setattr(session_module.RemotePlaySession, "close", record_close)
+        monkeypatch.setattr(session_module, "RETRY_DELAY", 0.05)
+        monkeypatch.setattr(
+            session_module,
+            "get_device",
+            AsyncMock(return_value=SimpleNamespace(status=DeviceStatus.AWAKE)),
+        )
+        assert await session_module.standby("127.0.0.1", CREDS, port=console.port, timeout=1) is True
+
+    assert console.ctrl_requests == 2
+    assert closes[0] is True, "the stuck session must be reset, not left half-open"
+    assert console.received[-1] == 0x50
