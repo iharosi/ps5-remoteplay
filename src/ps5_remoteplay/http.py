@@ -101,7 +101,13 @@ async def request(
             await writer.drain()
             response = await read_response(reader)
         finally:
+            # Fully close before the caller opens the next connection: the console
+            # refuses a second connection while this one is still closing.
             writer.close()
+            try:
+                await writer.wait_closed()
+            except (ConnectionError, OSError):
+                pass
     _LOGGER.debug(
         "%s %s: HTTP %d, headers %s, %d body bytes",
         method, path, response.status, sorted(response.headers), len(response.body),
