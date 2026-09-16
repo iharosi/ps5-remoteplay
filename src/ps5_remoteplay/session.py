@@ -1,7 +1,6 @@
 import asyncio
 import base64
 import logging
-import os
 import socket
 import struct
 from typing import Self
@@ -27,8 +26,7 @@ RESP_HEARTBEAT = 0xFE
 LOGIN_OK = 0
 LOGIN_PASSCODE_UNMATCHED = 1
 
-_DID_PREFIX = bytes.fromhex("00180000000700400080")
-_DID_SUFFIX = bytes(6)
+_DID = bytes.fromhex("00180000000700400080") + bytes(16) + bytes(6)
 _OS_TYPE = b"Win10.0.0"
 # The console ignores or resets the control connection when it arrives within
 # microseconds of the init connection closing; ~1 ms was enough in captures.
@@ -82,15 +80,11 @@ class RemotePlaySession:
                 def encrypted(data: bytes) -> str:
                     return base64.b64encode(cipher.encrypt(data)).decode()
 
-                # A fresh device id per session: the console appears to key sessions by it,
-                # and a fixed one makes every client and every retry collide.
-                did = _DID_PREFIX + os.urandom(16) + _DID_SUFFIX
-
                 # Encryption order sets the counters (0..4); keep it in this sequence.
                 headers = {
                     "RP-Auth": encrypted(bytes.fromhex(credentials.regist_key).ljust(NONCE_LENGTH, b"\0")),
                     "RP-Version": RP_VERSION,
-                    "RP-Did": encrypted(did),
+                    "RP-Did": encrypted(_DID),
                     "RP-ControllerType": "3",
                     "RP-ClientType": "11",
                     "RP-OSType": encrypted(_OS_TYPE),

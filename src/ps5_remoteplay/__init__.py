@@ -1,4 +1,4 @@
-__version__ = "0.1.7"
+__version__ = "0.1.8"
 
 from .credentials import Credentials
 from .discovery import DeviceInfo, DeviceStatus, discover, get_device, wait_for_status

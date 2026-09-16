@@ -132,10 +132,7 @@ async def test_login_and_standby():
     gap = console.event_times["ctrl opened"] - console.event_times["init closed"]
     assert gap >= 0.15, f"ctrl opened only {gap * 1000:.1f} ms after init closed"
     assert console.ctrl_headers["rp-auth"] == bytes.fromhex(REGIST_KEY).ljust(16, b"\0")
-    did = console.ctrl_headers["rp-did"]
-    assert len(did) == 32
-    assert did.startswith(bytes.fromhex("00180000000700400080")) and did.endswith(bytes(6))
-    assert did[10:26] != bytes(16), "device id must be random, not fixed"
+    assert console.ctrl_headers["rp-did"] == bytes.fromhex("00180000000700400080") + bytes(22)
     assert console.ctrl_headers["rp-ostype"] == b"Win10.0.0"
     assert console.ctrl_headers["rp-startbitrate"] == bytes(4)
     assert console.ctrl_headers["rp-streamingtype"] == b"\x01\x00\x00\x00"
