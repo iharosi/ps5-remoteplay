@@ -109,8 +109,9 @@ async def request(
             except (ConnectionError, OSError):
                 pass
     _LOGGER.debug(
-        "%s %s: HTTP %d, headers %s, %d body bytes",
-        method, path, response.status, sorted(response.headers), len(response.body),
+        "%s %s: HTTP %d (reason %s), headers %s, %d body bytes",
+        method, path, response.status, response.headers.get("rp-application-reason", "-"),
+        sorted(response.headers), len(response.body),
     )
     raise_for_status(response)
     return response

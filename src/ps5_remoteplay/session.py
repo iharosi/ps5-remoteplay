@@ -105,8 +105,9 @@ class RemotePlaySession:
                     _LOGGER.debug("GET /sie/ps5/rp/sess/ctrl: request sent")
                     response = await read_response(reader, read_body=False)
                     _LOGGER.debug(
-                        "GET /sie/ps5/rp/sess/ctrl: HTTP %d, headers %s",
-                        response.status, sorted(response.headers),
+                        "GET /sie/ps5/rp/sess/ctrl: HTTP %d (reason %s), headers %s",
+                        response.status, response.headers.get("rp-application-reason", "-"),
+                        sorted(response.headers),
                     )
                     raise_for_status(response)
                     if response.headers.get("content-length", "0") != "0":

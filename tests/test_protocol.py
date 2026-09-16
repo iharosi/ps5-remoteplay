@@ -96,3 +96,13 @@ def test_login_failed_messages():
 
     assert "another Remote Play session" in str(LoginFailed(2))
     assert str(LoginFailed(7)) == "Remote Play login failed (code 7)"
+
+
+def test_version_matches_package_metadata():
+    import tomllib
+    from pathlib import Path
+
+    import ps5_remoteplay
+
+    pyproject = tomllib.loads((Path(__file__).parent.parent / "pyproject.toml").read_text())
+    assert ps5_remoteplay.__version__ == pyproject["project"]["version"]

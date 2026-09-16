@@ -1,3 +1,5 @@
+__version__ = "0.1.6"
+
 from .credentials import Credentials
 from .discovery import DeviceInfo, DeviceStatus, discover, get_device, wait_for_status
 from .errors import (
@@ -17,6 +19,7 @@ from .wake import wake
 
 __all__ = [
     "Credentials",
+    "__version__",
     "DeviceInfo",
     "DeviceNotFound",
     "DeviceStatus",
