@@ -30,7 +30,9 @@ LOGIN_PASSCODE_UNMATCHED = 1
 _DID_PREFIX = bytes.fromhex("00180000000700400080")
 _DID_SUFFIX = bytes(6)
 _OS_TYPE = b"Win10.0.0"
-RETRY_DELAY = 3.0
+# The console ignores or resets the control connection when it arrives within
+# microseconds of the init connection closing; ~1 ms was enough in captures.
+CTRL_CONNECT_DELAY = 0.2
 
 
 def encode_frame(frame_type: int, payload: bytes = b"") -> bytes:
@@ -75,6 +77,7 @@ class RemotePlaySession:
             async with asyncio.timeout(timeout):
                 nonce = await _server_nonce(host, credentials, port, timeout)
                 cipher = SessionCipher(credentials.rp_key, nonce)
+                await asyncio.sleep(CTRL_CONNECT_DELAY)
 
                 def encrypted(data: bytes) -> str:
                     return base64.b64encode(cipher.encrypt(data)).decode()
@@ -228,19 +231,9 @@ async def standby(
     if device.status == DeviceStatus.STANDBY:
         return False
 
-    try:
-        session = await RemotePlaySession.open(
-            host, credentials, passcode=passcode, port=port, timeout=timeout
-        )
-    except ProtocolError as err:
-        # The first attempt may hit a session the console still thinks is open;
-        # opening it reset that connection, so one retry usually gets through.
-        _LOGGER.debug("Retrying session after: %s", err)
-        await asyncio.sleep(RETRY_DELAY)
-        session = await RemotePlaySession.open(
-            host, credentials, passcode=passcode, port=port, timeout=timeout
-        )
-
+    session = await RemotePlaySession.open(
+        host, credentials, passcode=passcode, port=port, timeout=timeout
+    )
     try:
         await session.standby()
     finally:

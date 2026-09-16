@@ -10,7 +10,7 @@ from types import SimpleNamespace
 from ps5_remoteplay import DeviceStatus
 from ps5_remoteplay.credentials import Credentials
 from ps5_remoteplay.crypto import SessionCipher
-from ps5_remoteplay.errors import PasscodeMismatch, PasscodeRequired, RemotePlayHttpError
+from ps5_remoteplay.errors import PasscodeMismatch, PasscodeRequired, ProtocolError, RemotePlayHttpError
 from ps5_remoteplay.session import RemotePlaySession, encode_frame
 
 RP_KEY = bytes(range(16))
@@ -34,7 +34,12 @@ class FakeConsole:
         self.reset_by_client = False
         self.received: list[int] = []
         self.events: list[str] = []
+        self.event_times: dict[str, float] = {}
         self.ctrl_headers: dict[str, bytes] = {}
+
+    def _event(self, name: str) -> None:
+        self.events.append(name)
+        self.event_times[name] = asyncio.get_running_loop().time()
 
     async def __aenter__(self):
         self.server = await asyncio.start_server(self.handle, "127.0.0.1", 0)
@@ -52,7 +57,7 @@ class FakeConsole:
         assert headers["content-length"] == "0"
         assert headers["user-agent"] == "remoteplay Windows"
 
-        self.events.append("ctrl opened" if "/ctrl" in request_line else "init opened")
+        self._event("ctrl opened" if "/ctrl" in request_line else "init opened")
         if "/init" in request_line:
             if self.reject_init:
                 writer.write(b"HTTP/1.1 403 Forbidden\r\nRP-Application-Reason: 80108b10\r\nContent-Length: 0\r\n\r\n")
@@ -63,7 +68,7 @@ class FakeConsole:
             await writer.drain()
             writer.close()
             await writer.wait_closed()
-            self.events.append("init closed")
+            self._event("init closed")
             return
 
         self.ctrl_requests += 1
@@ -122,8 +127,10 @@ async def test_login_and_standby():
         await session.close()
 
     assert console.received == [0x05, 0x1FE, 0x50]
-    # the console rejects a second connection opened while the first is still closing
+    # the console ignores or resets a control connection opened right as init closes
     assert console.events == ["init opened", "init closed", "ctrl opened"]
+    gap = console.event_times["ctrl opened"] - console.event_times["init closed"]
+    assert gap >= 0.15, f"ctrl opened only {gap * 1000:.1f} ms after init closed"
     assert console.ctrl_headers["rp-auth"] == bytes.fromhex(REGIST_KEY).ljust(16, b"\0")
     did = console.ctrl_headers["rp-did"]
     assert len(did) == 32
@@ -160,27 +167,19 @@ async def test_http_error_reason():
             await RemotePlaySession.open("127.0.0.1", CREDS, port=console.port, timeout=5)
 
 
-async def test_standby_retries_after_a_stuck_session(monkeypatch) -> None:
+async def test_stuck_session_is_reset_and_reported(monkeypatch) -> None:
     from ps5_remoteplay import session as session_module
 
+    monkeypatch.setattr(
+        session_module,
+        "get_device",
+        AsyncMock(return_value=SimpleNamespace(status=DeviceStatus.AWAKE)),
+    )
     async with FakeConsole(ignore_first_ctrl=True) as console:
-        closes: list[bool] = []
-        original_close = session_module.RemotePlaySession.close
+        with pytest.raises(ProtocolError, match="during session control request"):
+            await session_module.standby("127.0.0.1", CREDS, port=console.port, timeout=1)
+        await asyncio.sleep(0.05)
 
-        async def record_close(self, *, abort: bool = False):
-            closes.append(abort)
-            await original_close(self, abort=abort)
-
-        monkeypatch.setattr(session_module.RemotePlaySession, "close", record_close)
-        monkeypatch.setattr(session_module, "RETRY_DELAY", 0.05)
-        monkeypatch.setattr(
-            session_module,
-            "get_device",
-            AsyncMock(return_value=SimpleNamespace(status=DeviceStatus.AWAKE)),
-        )
-        assert await session_module.standby("127.0.0.1", CREDS, port=console.port, timeout=1) is True
-        assert console.reset_by_client, "the abandoned session must be reset, not closed politely"
-
-    assert console.ctrl_requests == 2
-    assert closes[0] is True, "the stuck session must be reset, not left half-open"
-    assert console.received[-1] == 0x50
+    # a retry right away only ever met "already in use" on a real console
+    assert console.ctrl_requests == 1
+    assert console.reset_by_client, "the abandoned session must be reset, not closed politely"
